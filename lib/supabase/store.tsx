@@ -1,289 +1,976 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { User, Session } from "@supabase/supabase-js";
 import {
-  Establecimiento,
-  Campana,
-  Lote,
-  Labor,
+  Farm,
+  Season,
+  Field,
+  FieldActivity,
   TimelineEvent,
-  RegistroLluvia,
-  ResumenEconomico,
-  Maquinaria,
-  MensajeChat,
-  Cultivo,
-  EstadoLabor,
-  TipoLabor,
+  RainfallRecord,
+  FinancialTransaction,
+  FinancialSummary,
+  Machinery,
+  ChatMessage,
+  ActivityStatus,
 } from "./types";
-import {
-  ESTABLECIMIENTO_ACTUAL,
-  CAMPANAS_MOCK,
-  LOTES_MOCK,
-  LABORES_MOCK,
-  TIMELINE_MOCK,
-  LLUVIAS_MOCK,
-  ECONOMIA_MOCK,
-  MAQUINARIAS_MOCK,
-} from "./mock-data";
-import { isSupabaseConfigured } from "./client";
+import { supabase, isSupabaseConfigured } from "./client";
 
-interface StoreContextType {
-  establecimiento: Establecimiento;
-  campanas: Campana[];
+/**
+ * Interface defining the global state and CRUD dispatchers.
+ */
+interface FarmStoreContextType {
+  // Auth state
+  user: User | null;
+  session: Session | null;
+  isAuthenticated: boolean;
+  isAuthModalOpen: boolean;
+  openAuthModal: () => void;
+  closeAuthModal: () => void;
+  signOut: () => Promise<void>;
+
+  // Domain data
+  farm: Farm;
+  seasons: Season[];
+  selectedSeasonId: string;
+  setSelectedSeasonId: (id: string) => void;
+  selectedSeason: Season;
+  fields: Field[];
+  activities: FieldActivity[];
+  timelineEvents: Record<string, TimelineEvent[]>;
+  rainfallRecords: RainfallRecord[];
+  transactions: FinancialTransaction[];
+  finances: FinancialSummary;
+  machinery: Machinery[];
+  chatMessages: ChatMessage[];
+  isMock: boolean;
+  isLoading: boolean;
+
+  // CRUD Field operations
+  addField: (field: Omit<Field, "id" | "establecimiento_id" | "campana_id" | "user_id">) => Promise<void>;
+  updateField: (id: string, updates: Partial<Field>) => Promise<void>;
+  deleteField: (id: string) => Promise<void>;
+
+  // CRUD Activity operations
+  addActivity: (activity: Omit<FieldActivity, "id" | "campana_id" | "user_id">) => Promise<void>;
+  updateActivity: (id: string, updates: Partial<FieldActivity>) => Promise<void>;
+  updateActivityStatus: (activityId: string, newStatus: ActivityStatus) => Promise<void>;
+  deleteActivity: (id: string) => Promise<void>;
+
+  // CRUD Machinery operations
+  addMachinery: (mach: Omit<Machinery, "id" | "user_id" | "establecimiento_id">) => Promise<void>;
+  updateMachinery: (id: string, updates: Partial<Machinery>) => Promise<void>;
+  deleteMachinery: (id: string) => Promise<void>;
+
+  // CRUD Rainfall operations
+  addRainfall: (millimeters: number, fieldName?: string, notes?: string) => Promise<void>;
+  deleteRainfall: (id: string) => Promise<void>;
+
+  // CRUD Financial operations
+  addTransaction: (tx: Omit<FinancialTransaction, "id" | "user_id" | "campana_id">) => Promise<void>;
+  deleteTransaction: (id: string) => Promise<void>;
+
+  // Farm & Season management
+  updateFarm: (updates: Partial<Farm>) => Promise<void>;
+  addSeason: (name: string, startDate: string) => Promise<void>;
+
+  // Timeline & AI Chat
+  addTimelineEvent: (fieldId: string, event: Omit<TimelineEvent, "id" | "lote_id" | "user_id">) => Promise<void>;
+  sendChatMessage: (text: string) => Promise<void>;
+  refetchData: () => Promise<void>;
+
+  // Aliases for Spanish backward compatibility
+  establecimiento: Farm;
+  campanas: Season[];
   selectedCampanaId: string;
   setSelectedCampanaId: (id: string) => void;
-  selectedCampana: Campana;
-  lotes: Lote[];
-  labores: Labor[];
-  timelineEvents: Record<string, TimelineEvent[]>;
-  lluvias: RegistroLluvia[];
-  economia: ResumenEconomico;
-  maquinarias: Maquinaria[];
-  chatMessages: MensajeChat[];
-  isMock: boolean;
-  addLote: (lote: Omit<Lote, "id" | "establecimiento_id" | "campana_id">) => void;
-  addLabor: (labor: Omit<Labor, "id" | "campana_id">) => void;
-  updateLaborStatus: (laborId: string, nuevoEstado: EstadoLabor) => void;
-  addLluvia: (milimetros: number, lote_nombre?: string, observaciones?: string) => void;
-  addTimelineEvent: (loteId: string, event: Omit<TimelineEvent, "id" | "lote_id">) => void;
-  sendChatMessage: (texto: string) => Promise<void>;
-  resetToDefaults: () => void;
+  selectedCampana: Season;
+  lotes: Field[];
+  labores: FieldActivity[];
+  lluvias: RainfallRecord[];
+  transacciones: FinancialTransaction[];
+  economia: FinancialSummary;
+  maquinarias: Machinery[];
+  addLote: (lote: Omit<Field, "id" | "establecimiento_id" | "campana_id" | "user_id">) => Promise<void>;
+  updateLote: (id: string, updates: Partial<Field>) => Promise<void>;
+  deleteLote: (id: string) => Promise<void>;
+  addLabor: (labor: Omit<FieldActivity, "id" | "campana_id" | "user_id">) => Promise<void>;
+  updateLabor: (id: string, updates: Partial<FieldActivity>) => Promise<void>;
+  updateLaborStatus: (laborId: string, nuevoEstado: ActivityStatus) => Promise<void>;
+  deleteLabor: (id: string) => Promise<void>;
+  addLluvia: (milimetros: number, lote_nombre?: string, observaciones?: string) => Promise<void>;
+  deleteLluvia: (id: string) => Promise<void>;
+  addTransaccion: (trans: Omit<FinancialTransaction, "id" | "user_id" | "campana_id">) => Promise<void>;
+  deleteTransaccion: (id: string) => Promise<void>;
+  updateEstablecimiento: (updates: Partial<Farm>) => Promise<void>;
+  addCampana: (nombre: string, fechaInicio: string) => Promise<void>;
 }
 
-const StoreContext = createContext<StoreContextType | null>(null);
+const StoreContext = createContext<FarmStoreContextType | null>(null);
 
-const STORAGE_KEY_PREFIX = "lote_app_state_v1";
+const DEFAULT_FARM: Farm = {
+  id: "farm-default",
+  nombre: "Mi Establecimiento",
+  titular: "Productor Agropecuario",
+  ubicacion: "Zona Núcleo, Argentina",
+  superficie_total: 0,
+};
 
+const DEFAULT_SEASON: Season = {
+  id: "season-default",
+  nombre: "Campaña 2025/26",
+  fecha_inicio: "01/07/2025",
+  activa: true,
+};
+
+/**
+ * Global Store Provider managing authentication state and multi-tenant domain data.
+ */
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [establecimiento, setEstablecimiento] = useState<Establecimiento>(ESTABLECIMIENTO_ACTUAL);
-  const [campanas, setCampanas] = useState<Campana[]>(CAMPANAS_MOCK);
-  const [selectedCampanaId, setSelectedCampanaId] = useState<string>("camp-2025-26");
-  const [lotes, setLotes] = useState<Lote[]>(LOTES_MOCK);
-  const [labores, setLabores] = useState<Labor[]>(LABORES_MOCK);
-  const [timelineEvents, setTimelineEvents] = useState<Record<string, TimelineEvent[]>>(TIMELINE_MOCK);
-  const [lluvias, setLluvias] = useState<RegistroLluvia[]>(LLUVIAS_MOCK);
-  const [economia, setEconomia] = useState<ResumenEconomico>(ECONOMIA_MOCK);
-  const [maquinarias, setMaquinarias] = useState<Maquinaria[]>(MAQUINARIAS_MOCK);
-  const [chatMessages, setChatMessages] = useState<MensajeChat[]>([
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const [farm, setFarm] = useState<Farm>(DEFAULT_FARM);
+  const [seasons, setSeasons] = useState<Season[]>([DEFAULT_SEASON]);
+  const [selectedSeasonId, setSelectedSeasonId] = useState<string>("season-default");
+  const [fields, setFields] = useState<Field[]>([]);
+  const [activities, setActivities] = useState<FieldActivity[]>([]);
+  const [timelineEvents, setTimelineEvents] = useState<Record<string, TimelineEvent[]>>({});
+  const [rainfallRecords, setRainfallRecords] = useState<RainfallRecord[]>([]);
+  const [transactions, setTransactions] = useState<FinancialTransaction[]>([]);
+  const [machinery, setMachinery] = useState<Machinery[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
       id: "msg-welcome",
       emisor: "lia",
       mensaje:
-        "¡Hola Gabriel! 👋 Soy Lía, tu asistente inteligente del campo. ¿En qué puedo ayudarte hoy? Podés preguntarme sobre rindes, comparaciones de campañas, dosis o historia de tus lotes.",
+        "Hola, soy Lía, tu asistente agronómica con inteligencia artificial. Puedo analizar tus lotes, calcular márgenes, recomendar dosis o responder sobre tus labores cargadas.",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       sugerencias: [
-        "¿Por qué el lote 4 rindió menos?",
-        "Comparar rendimiento 2024 vs 2025",
+        "¿Cómo están mis lotes hoy?",
+        "Resumen de labores pendientes",
         "Recomendaciones de fertilización",
-        "Contame qué pasó en el lote 7",
       ],
     },
   ]);
 
-  // Load from localStorage on mount
+  /**
+   * Recalculates gross margins, revenues, expenses and categorized breakdowns.
+   */
+  const computeFinancialSummary = useCallback(
+    (txList: FinancialTransaction[], fieldList: Field[], seasonId: string): FinancialSummary => {
+      let totalIncome = 0;
+      let totalExpenses = 0;
+      const categoryMap: Record<string, number> = {
+        Insumos: 0,
+        Labores: 0,
+        Semillas: 0,
+        Flete: 0,
+        Otros: 0,
+      };
+
+      txList.forEach((tx) => {
+        const amount = Number(tx.monto) || 0;
+        if (tx.tipo === "Ingreso") {
+          totalIncome += amount;
+        } else {
+          totalExpenses += amount;
+          const cat = tx.categoria in categoryMap ? tx.categoria : "Otros";
+          categoryMap[cat] = (categoryMap[cat] || 0) + amount;
+        }
+      });
+
+      const categoryColors: Record<string, string> = {
+        Insumos: "#4F8A3F",
+        Labores: "#10B981",
+        Semillas: "#F59E0B",
+        Flete: "#F97316",
+        Otros: "#64748B",
+      };
+
+      const breakdown = Object.entries(categoryMap).map(([cat, amount]) => ({
+        categoria: cat as any,
+        monto: amount,
+        porcentaje: totalExpenses > 0 ? Math.round((amount / totalExpenses) * 100) : 0,
+        color: categoryColors[cat] || "#64748B",
+      }));
+
+      const totalHectares = fieldList.reduce((acc, f) => acc + (Number(f.hectareas) || 0), 0);
+      const grossMargin = totalIncome - totalExpenses;
+
+      return {
+        campana_id: seasonId,
+        ingresos_totales: totalIncome,
+        gastos_totales: totalExpenses,
+        margen_bruto: grossMargin,
+        margen_por_ha: totalHectares > 0 ? Math.round(grossMargin / totalHectares) : 0,
+        distribucion_gastos: breakdown,
+      };
+    },
+    []
+  );
+
+  const [finances, setFinances] = useState<FinancialSummary>(() =>
+    computeFinancialSummary([], [], "season-default")
+  );
+
+  const isDataLoadingRef = useRef(false);
+
+  /**
+   * Loads all farm entities belonging to the authenticated user from Supabase.
+   */
+  const loadUserData = useCallback(
+    async (currentUserId: string, userMetadata?: any) => {
+      if (!supabase || isDataLoadingRef.current) return;
+      isDataLoadingRef.current = true;
+
+      try {
+        // 1. Farm
+        let { data: farmData } = await supabase
+          .from("establecimientos")
+          .select("*")
+          .eq("user_id", currentUserId)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (!farmData) {
+          const initialFarm = {
+            user_id: currentUserId,
+            nombre: userMetadata?.establecimiento_nombre || "Establecimiento Principal",
+            titular: userMetadata?.full_name || "Productor",
+            ubicacion: "Zona Núcleo, Argentina",
+            superficie_total: 0,
+          };
+          const { data: created } = await supabase
+            .from("establecimientos")
+            .insert(initialFarm)
+            .select()
+            .maybeSingle();
+          farmData = created || { ...initialFarm, id: `farm-${Date.now()}` };
+        }
+
+        if (farmData) {
+          setFarm(farmData as Farm);
+        }
+
+        // 2. Seasons
+        let { data: seasonData } = await supabase
+          .from("campanas")
+          .select("*")
+          .eq("user_id", currentUserId)
+          .order("created_at", { ascending: false });
+
+        if (!seasonData || seasonData.length === 0) {
+          const defaultSeason = {
+            user_id: currentUserId,
+            nombre: "Campaña 2025/26",
+            fecha_inicio: "01/07/2025",
+            activa: true,
+          };
+          const { data: createdSeason } = await supabase
+            .from("campanas")
+            .insert(defaultSeason)
+            .select();
+          seasonData = createdSeason || [{ ...defaultSeason, id: `season-${Date.now()}` } as any];
+        }
+
+        if (seasonData && seasonData.length > 0) {
+          setSeasons(seasonData as Season[]);
+          const active = seasonData.find((s) => s.activa) || seasonData[0];
+          setSelectedSeasonId(active.id);
+        }
+
+        // 3. Fields
+        const { data: fieldsData } = await supabase
+          .from("lotes")
+          .select("*")
+          .eq("user_id", currentUserId)
+          .order("numero", { ascending: true });
+
+        const currentFields = (fieldsData || []) as Field[];
+        setFields(currentFields);
+
+        // Update total hectares in farm if needed
+        const sumHectares = currentFields.reduce((acc, f) => acc + (Number(f.hectareas) || 0), 0);
+        if (farmData && farmData.superficie_total !== sumHectares) {
+          setFarm((prev) => ({ ...prev, superficie_total: sumHectares }));
+          await supabase
+            .from("establecimientos")
+            .update({ superficie_total: sumHectares })
+            .eq("id", farmData.id);
+        }
+
+        // 4. Activities
+        const { data: activitiesData } = await supabase
+          .from("labores")
+          .select("*")
+          .eq("user_id", currentUserId)
+          .order("fecha", { ascending: false });
+
+        setActivities((activitiesData || []) as FieldActivity[]);
+
+        // 5. Timeline Events
+        const { data: timelineData } = await supabase
+          .from("timeline_eventos")
+          .select("*")
+          .eq("user_id", currentUserId)
+          .order("created_at", { ascending: false });
+
+        const grouped: Record<string, TimelineEvent[]> = {};
+        (timelineData || []).forEach((ev: any) => {
+          if (!grouped[ev.lote_id]) grouped[ev.lote_id] = [];
+          grouped[ev.lote_id].push(ev as TimelineEvent);
+        });
+        setTimelineEvents(grouped);
+
+        // 6. Machinery Fleet
+        const { data: machineryData } = await supabase
+          .from("maquinarias")
+          .select("*")
+          .eq("user_id", currentUserId)
+          .order("created_at", { ascending: true });
+
+        setMachinery((machineryData || []) as Machinery[]);
+
+        // 7. Rainfall Records
+        const { data: rainData } = await supabase
+          .from("lluvias")
+          .select("*")
+          .eq("user_id", currentUserId)
+          .order("fecha", { ascending: false });
+
+        setRainfallRecords((rainData || []) as RainfallRecord[]);
+
+        // 8. Financial Transactions
+        const { data: txData } = await supabase
+          .from("finanzas")
+          .select("*")
+          .eq("user_id", currentUserId)
+          .order("fecha", { ascending: false });
+
+        const currentTx = (txData || []) as FinancialTransaction[];
+        setTransactions(currentTx);
+        setFinances(
+          computeFinancialSummary(
+            currentTx,
+            currentFields,
+            seasonData?.[0]?.id || "season-default"
+          )
+        );
+
+        // 9. AI Chat Messages
+        const { data: chatData } = await supabase
+          .from("lia_conversaciones")
+          .select("*")
+          .eq("user_id", currentUserId)
+          .order("created_at", { ascending: true });
+
+        if (chatData && chatData.length > 0) {
+          setChatMessages(
+            chatData.map((c) => ({
+              id: c.id,
+              emisor: c.emisor,
+              mensaje: c.mensaje,
+              timestamp:
+                c.timestamp ||
+                new Date(c.created_at).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }),
+              sugerencias: c.sugerencias,
+              datos_adjuntos: c.datos_adjuntos,
+            }))
+          );
+        }
+      } catch (err) {
+        console.error("Error loading user data from Supabase:", err);
+      } finally {
+        isDataLoadingRef.current = false;
+      }
+    },
+    [computeFinancialSummary]
+  );
+
+  // Handle Authentication Lifecycle once on mount
   useEffect(() => {
-    try {
-      const savedLotes = localStorage.getItem(`${STORAGE_KEY_PREFIX}_lotes`);
-      const savedLabores = localStorage.getItem(`${STORAGE_KEY_PREFIX}_labores`);
-      const savedLluvias = localStorage.getItem(`${STORAGE_KEY_PREFIX}_lluvias`);
-      const savedCampana = localStorage.getItem(`${STORAGE_KEY_PREFIX}_campana`);
-      const savedTimeline = localStorage.getItem(`${STORAGE_KEY_PREFIX}_timeline`);
-      const savedChat = localStorage.getItem(`${STORAGE_KEY_PREFIX}_chat`);
-
-      if (savedLotes) setLotes(JSON.parse(savedLotes));
-      if (savedLabores) setLabores(JSON.parse(savedLabores));
-      if (savedLluvias) setLluvias(JSON.parse(savedLluvias));
-      if (savedCampana) setSelectedCampanaId(savedCampana);
-      if (savedTimeline) setTimelineEvents(JSON.parse(savedTimeline));
-      if (savedChat) setChatMessages(JSON.parse(savedChat));
-    } catch (e) {
-      console.warn("Could not read local storage state:", e);
+    if (!supabase) {
+      setIsLoading(false);
+      return;
     }
-    setIsLoaded(true);
-  }, []);
 
-  // Save changes to localStorage
-  useEffect(() => {
-    if (!isLoaded) return;
-    try {
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}_lotes`, JSON.stringify(lotes));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}_labores`, JSON.stringify(labores));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}_lluvias`, JSON.stringify(lluvias));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}_campana`, selectedCampanaId);
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}_timeline`, JSON.stringify(timelineEvents));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}_chat`, JSON.stringify(chatMessages));
-    } catch (e) {
-      console.warn("Could not save to local storage:", e);
-    }
-  }, [lotes, labores, lluvias, selectedCampanaId, timelineEvents, chatMessages, isLoaded]);
+    let isMounted = true;
 
-  const selectedCampana =
-    campanas.find((c) => c.id === selectedCampanaId) || campanas[0];
+    // Safety timeout: Never stay stuck on loading for more than 4 seconds
+    const safetyTimer = setTimeout(() => {
+      if (isMounted) {
+        setIsLoading(false);
+      }
+    }, 4000);
 
-  const addLote = (newLoteData: Omit<Lote, "id" | "establecimiento_id" | "campana_id">) => {
-    const newLote: Lote = {
-      ...newLoteData,
-      id: `lote-${Date.now()}`,
-      establecimiento_id: establecimiento.id,
-      campana_id: selectedCampanaId,
+    // Initial session check
+    supabase.auth
+      .getSession()
+      .then(async ({ data: { session: currentSession } }) => {
+        if (!isMounted) return;
+        setSession(currentSession);
+        setUser(currentSession?.user ?? null);
+
+        if (currentSession?.user) {
+          await loadUserData(currentSession.user.id, currentSession.user.user_metadata);
+        }
+      })
+      .catch((err) => {
+        console.error("Session fetch error:", err);
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoading(false);
+          clearTimeout(safetyTimer);
+        }
+      });
+
+    // Reactive Auth State listener
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (!isMounted) return;
+
+      setSession(newSession);
+      setUser(newSession?.user ?? null);
+
+      if (newSession?.user) {
+        setIsLoading(true);
+        await loadUserData(newSession.user.id, newSession.user.user_metadata);
+        if (isMounted) setIsLoading(false);
+      } else {
+        setFarm(DEFAULT_FARM);
+        setSeasons([DEFAULT_SEASON]);
+        setFields([]);
+        setActivities([]);
+        setTimelineEvents({});
+        setRainfallRecords([]);
+        setTransactions([]);
+        setMachinery([]);
+        setFinances(computeFinancialSummary([], [], "season-default"));
+        if (isMounted) setIsLoading(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      clearTimeout(safetyTimer);
+      subscription.unsubscribe();
     };
-    setLotes((prev) => [...prev, newLote]);
+  }, [loadUserData, computeFinancialSummary]);
+
+  const selectedSeason =
+    seasons.find((s) => s.id === selectedSeasonId) || seasons[0] || DEFAULT_SEASON;
+
+  const signOut = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
   };
 
-  const addLabor = (newLaborData: Omit<Labor, "id" | "campana_id">) => {
-    const newLabor: Labor = {
-      ...newLaborData,
-      id: `lab-${Date.now()}`,
-      campana_id: selectedCampanaId,
+  // ----------------------------------------------------
+  // FIELD CRUD DISPATCHERS
+  // ----------------------------------------------------
+  const addField = async (
+    fieldData: Omit<Field, "id" | "establecimiento_id" | "campana_id" | "user_id">
+  ) => {
+    const defaultCoords = fieldData.map_coords || {
+      polygon: [
+        { x: 30 + Math.floor(Math.random() * 40), y: 20 + Math.floor(Math.random() * 40) },
+        { x: 45 + Math.floor(Math.random() * 40), y: 20 + Math.floor(Math.random() * 40) },
+        { x: 45 + Math.floor(Math.random() * 40), y: 40 + Math.floor(Math.random() * 40) },
+        { x: 30 + Math.floor(Math.random() * 40), y: 40 + Math.floor(Math.random() * 40) },
+      ],
+      center: { x: 40, y: 35 },
     };
-    setLabores((prev) => [newLabor, ...prev]);
 
-    // Also add to timeline if it belongs to a lote
-    if (newLabor.lote_id) {
+    const newRecord: any = {
+      ...fieldData,
+      map_coords: defaultCoords,
+      establecimiento_id: farm.id !== "farm-default" ? farm.id : undefined,
+      campana_id: selectedSeasonId !== "season-default" ? selectedSeasonId : undefined,
+      user_id: user?.id,
+    };
+
+    if (supabase && user) {
+      const { data, error } = await supabase.from("lotes").insert(newRecord).select().single();
+      if (data && !error) {
+        setFields((prev) => [...prev, data as Field]);
+        const newTotalHa = fields.reduce((acc, f) => acc + f.hectareas, 0) + (data.hectareas || 0);
+        setFarm((prev) => ({ ...prev, superficie_total: newTotalHa }));
+        return;
+      }
+    }
+
+    const fallbackField: Field = {
+      ...newRecord,
+      id: `field-${Date.now()}`,
+    };
+    setFields((prev) => [...prev, fallbackField]);
+  };
+
+  const updateField = async (id: string, updates: Partial<Field>) => {
+    setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)));
+
+    if (supabase && user) {
+      await supabase.from("lotes").update(updates).eq("id", id);
+    }
+  };
+
+  const deleteField = async (id: string) => {
+    setFields((prev) => prev.filter((f) => f.id !== id));
+    setActivities((prev) => prev.filter((a) => a.lote_id !== id));
+
+    if (supabase && user) {
+      await supabase.from("lotes").delete().eq("id", id);
+    }
+  };
+
+  // ----------------------------------------------------
+  // ACTIVITY CRUD DISPATCHERS
+  // ----------------------------------------------------
+  const addActivity = async (
+    activityData: Omit<FieldActivity, "id" | "campana_id" | "user_id">
+  ) => {
+    const newRecord: any = {
+      ...activityData,
+      campana_id: selectedSeasonId !== "season-default" ? selectedSeasonId : undefined,
+      user_id: user?.id,
+    };
+
+    let insertedActivity: FieldActivity = {
+      ...newRecord,
+      id: `act-${Date.now()}`,
+    };
+
+    if (supabase && user) {
+      const { data, error } = await supabase.from("labores").insert(newRecord).select().single();
+      if (data && !error) {
+        insertedActivity = data as FieldActivity;
+      }
+    }
+
+    setActivities((prev) => [insertedActivity, ...prev]);
+
+    if (insertedActivity.lote_id) {
       const timelineType =
-        newLabor.tipo === "Siembra"
+        insertedActivity.tipo === "Siembra"
           ? "siembra"
-          : newLabor.tipo === "Fertilización"
+          : insertedActivity.tipo === "Fertilización"
           ? "fertilizacion"
-          : newLabor.tipo === "Pulverización"
+          : insertedActivity.tipo === "Pulverización"
           ? "pulverizacion"
-          : newLabor.tipo === "Cosecha"
+          : insertedActivity.tipo === "Cosecha"
           ? "cosecha"
           : "otro";
 
-      addTimelineEvent(newLabor.lote_id, {
-        fecha: new Date(newLabor.fecha).toLocaleDateString("es-AR", {
+      await addTimelineEvent(insertedActivity.lote_id, {
+        fecha: new Date(insertedActivity.fecha).toLocaleDateString("es-AR", {
           day: "numeric",
           month: "short",
           year: "numeric",
         }),
         tipo: timelineType,
-        titulo: `${newLabor.tipo} ${newLabor.cultivo}`,
-        descripcion: newLabor.observaciones || `Aplicación de ${newLabor.insumo_principal || "labor agronómica"}`,
+        titulo: `${insertedActivity.tipo} ${insertedActivity.cultivo || ""}`,
+        descripcion:
+          insertedActivity.observaciones ||
+          `Aplicación de ${insertedActivity.insumo_principal || "labor agronómica"}`,
         datos_clave: [
-          ...(newLabor.dosis ? [{ etiqueta: "Dosis", valor: newLabor.dosis }] : []),
-          ...(newLabor.maquinaria ? [{ etiqueta: "Equipo", valor: newLabor.maquinaria }] : []),
+          ...(insertedActivity.dosis ? [{ etiqueta: "Dosis", valor: insertedActivity.dosis }] : []),
+          ...(insertedActivity.maquinaria ? [{ etiqueta: "Equipo", valor: insertedActivity.maquinaria }] : []),
         ],
-        autor: newLabor.operario || "Administración LOTE",
+        autor: insertedActivity.operario || "Administración LOTE",
       });
     }
   };
 
-  const updateLaborStatus = (laborId: string, nuevoEstado: EstadoLabor) => {
-    setLabores((prev) =>
-      prev.map((l) => (l.id === laborId ? { ...l, estado: nuevoEstado } : l))
-    );
+  const updateActivity = async (id: string, updates: Partial<FieldActivity>) => {
+    setActivities((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
+
+    if (supabase && user) {
+      await supabase.from("labores").update(updates).eq("id", id);
+    }
   };
 
-  const addLluvia = (milimetros: number, lote_nombre: string = "General Establecimiento", observaciones?: string) => {
-    const nuevaLluvia: RegistroLluvia = {
-      id: `lluv-${Date.now()}`,
+  const updateActivityStatus = async (activityId: string, newStatus: ActivityStatus) => {
+    await updateActivity(activityId, { estado: newStatus });
+  };
+
+  const deleteActivity = async (id: string) => {
+    setActivities((prev) => prev.filter((a) => a.id !== id));
+
+    if (supabase && user) {
+      await supabase.from("labores").delete().eq("id", id);
+    }
+  };
+
+  // ----------------------------------------------------
+  // MACHINERY CRUD DISPATCHERS
+  // ----------------------------------------------------
+  const addMachinery = async (
+    machData: Omit<Machinery, "id" | "user_id" | "establecimiento_id">
+  ) => {
+    const newRecord: any = {
+      ...machData,
+      establecimiento_id: farm.id !== "farm-default" ? farm.id : undefined,
+      user_id: user?.id,
+    };
+
+    let insertedMach: Machinery = {
+      ...newRecord,
+      id: `mach-${Date.now()}`,
+    };
+
+    if (supabase && user) {
+      const { data, error } = await supabase
+        .from("maquinarias")
+        .insert(newRecord)
+        .select()
+        .single();
+      if (data && !error) {
+        insertedMach = data as Machinery;
+      }
+    }
+
+    setMachinery((prev) => [...prev, insertedMach]);
+  };
+
+  const updateMachinery = async (id: string, updates: Partial<Machinery>) => {
+    setMachinery((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)));
+
+    if (supabase && user) {
+      await supabase.from("maquinarias").update(updates).eq("id", id);
+    }
+  };
+
+  const deleteMachinery = async (id: string) => {
+    setMachinery((prev) => prev.filter((m) => m.id !== id));
+
+    if (supabase && user) {
+      await supabase.from("maquinarias").delete().eq("id", id);
+    }
+  };
+
+  // ----------------------------------------------------
+  // RAINFALL CRUD DISPATCHERS
+  // ----------------------------------------------------
+  const addRainfall = async (
+    millimeters: number,
+    fieldName: string = "General Establecimiento",
+    notes?: string
+  ) => {
+    const newRecord: any = {
       fecha: new Date().toISOString().split("T")[0],
-      milimetros,
-      lote_nombre,
-      observaciones: observaciones || `Registro pluviométrico de ${milimetros} mm`,
-      campana_id: selectedCampanaId,
+      milimetros: millimeters,
+      lote_nombre: fieldName,
+      observaciones: notes || `Registro pluviométrico de ${millimeters} mm`,
+      campana_id: selectedSeasonId !== "season-default" ? selectedSeasonId : undefined,
+      user_id: user?.id,
     };
-    setLluvias((prev) => [nuevaLluvia, ...prev]);
+
+    let insertedRain: RainfallRecord = {
+      ...newRecord,
+      id: `rain-${Date.now()}`,
+    };
+
+    if (supabase && user) {
+      const { data, error } = await supabase.from("lluvias").insert(newRecord).select().single();
+      if (data && !error) {
+        insertedRain = data as RainfallRecord;
+      }
+    }
+
+    setRainfallRecords((prev) => [insertedRain, ...prev]);
   };
 
-  const addTimelineEvent = (loteId: string, eventData: Omit<TimelineEvent, "id" | "lote_id">) => {
-    const newEvent: TimelineEvent = {
+  const deleteRainfall = async (id: string) => {
+    setRainfallRecords((prev) => prev.filter((r) => r.id !== id));
+
+    if (supabase && user) {
+      await supabase.from("lluvias").delete().eq("id", id);
+    }
+  };
+
+  // ----------------------------------------------------
+  // FINANCIAL CRUD DISPATCHERS
+  // ----------------------------------------------------
+  const addTransaction = async (
+    txData: Omit<FinancialTransaction, "id" | "user_id" | "campana_id">
+  ) => {
+    const newRecord: any = {
+      ...txData,
+      campana_id: selectedSeasonId !== "season-default" ? selectedSeasonId : undefined,
+      user_id: user?.id,
+    };
+
+    let insertedTx: FinancialTransaction = {
+      ...newRecord,
+      id: `tx-${Date.now()}`,
+    };
+
+    if (supabase && user) {
+      const { data, error } = await supabase.from("finanzas").insert(newRecord).select().single();
+      if (data && !error) {
+        insertedTx = data as FinancialTransaction;
+      }
+    }
+
+    const updatedList = [insertedTx, ...transactions];
+    setTransactions(updatedList);
+    setFinances(computeFinancialSummary(updatedList, fields, selectedSeasonId));
+  };
+
+  const deleteTransaction = async (id: string) => {
+    const updatedList = transactions.filter((t) => t.id !== id);
+    setTransactions(updatedList);
+    setFinances(computeFinancialSummary(updatedList, fields, selectedSeasonId));
+
+    if (supabase && user) {
+      await supabase.from("finanzas").delete().eq("id", id);
+    }
+  };
+
+  // ----------------------------------------------------
+  // FARM & SEASON MANAGEMENT
+  // ----------------------------------------------------
+  const updateFarm = async (updates: Partial<Farm>) => {
+    setFarm((prev) => ({ ...prev, ...updates }));
+
+    if (supabase && user && farm.id !== "farm-default") {
+      await supabase.from("establecimientos").update(updates).eq("id", farm.id);
+    }
+  };
+
+  const addSeason = async (name: string, startDate: string) => {
+    const newRecord: any = {
+      nombre: name,
+      fecha_inicio: startDate,
+      activa: true,
+      user_id: user?.id,
+    };
+
+    let insertedSeason: Season = {
+      ...newRecord,
+      id: `season-${Date.now()}`,
+    };
+
+    if (supabase && user) {
+      const { data } = await supabase.from("campanas").insert(newRecord).select().single();
+      if (data) insertedSeason = data as Season;
+    }
+
+    setSeasons((prev) => [insertedSeason, ...prev]);
+    setSelectedSeasonId(insertedSeason.id);
+  };
+
+  // ----------------------------------------------------
+  // TIMELINE & AI CHAT DISPATCHERS
+  // ----------------------------------------------------
+  const addTimelineEvent = async (
+    fieldId: string,
+    eventData: Omit<TimelineEvent, "id" | "lote_id" | "user_id">
+  ) => {
+    const newRecord: any = {
       ...eventData,
-      id: `tl-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      lote_id: loteId,
+      lote_id: fieldId,
+      user_id: user?.id,
     };
-    setTimelineEvents((prev) => {
-      const existing = prev[loteId] || [];
-      return {
-        ...prev,
-        [loteId]: [newEvent, ...existing],
-      };
-    });
+
+    let newEvent: TimelineEvent = {
+      ...newRecord,
+      id: `tl-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    };
+
+    if (supabase && user) {
+      const { data } = await supabase.from("timeline_eventos").insert(newRecord).select().single();
+      if (data) newEvent = data as TimelineEvent;
+    }
+
+    setTimelineEvents((prev) => ({
+      ...prev,
+      [fieldId]: [newEvent, ...(prev[fieldId] || [])],
+    }));
   };
 
-  const sendChatMessage = async (texto: string) => {
-    const userMsg: MensajeChat = {
-      id: `msg-user-${Date.now()}`,
+  const sendChatMessage = async (text: string) => {
+    const userMsgId = `msg-user-${Date.now()}`;
+    const userTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+    const userMsg: ChatMessage = {
+      id: userMsgId,
       emisor: "usuario",
-      mensaje: texto,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      mensaje: text,
+      timestamp: userTime,
     };
 
     setChatMessages((prev) => [...prev, userMsg]);
 
-    // Generate intelligent contextual response
-    setTimeout(() => {
-      let botResponse = "";
-      const lower = texto.toLowerCase();
+    if (supabase && user) {
+      await supabase.from("lia_conversaciones").insert({
+        id: userMsgId,
+        user_id: user.id,
+        emisor: "usuario",
+        mensaje: text,
+        timestamp: userTime,
+      });
+    }
 
-      if (lower.includes("lote 4") || lower.includes("rendimiento") || lower.includes("rindió menos")) {
-        botResponse = `Analicé los datos del **Lote 4 (Soja - 110 ha)** y estas fueron las principales causas de menor rinde:\n\n• **Menor lluvia en floración**: -58 mm respecto a la media histórica en enero.\n• **Menor dosis de nitrógeno y fósforo**: -40 kg/ha en fertilización de base.\n• **Mayor temperatura promedio**: +2.1 °C durante llenado de grano.\n\n🌱 **Recomendación Lía**: Para la campaña 2026/27 sugiero rotar a Maíz con fertilización variable de base y cobertura previa de vicia.`;
-      } else if (lower.includes("comparar") || (lower.includes("2024") && lower.includes("2025"))) {
-        botResponse = `📊 **Comparación Campaña 2024/25 vs 2025/26:**\n\n• **Superficie Sembrada**: 1.125 ha (Igualada)\n• **Rendimiento Maíz promedio**: +7.4% (de 96 qq/ha a 103 qq/ha)\n• **Margen Bruto Total**: USD 324.580 (+$42.100 respecto al ciclo anterior)\n• **Consumo de Insumos**: Ahorro del 6.8% gracias a dosis variable en sembradora John Deere DB60.`;
-      } else if (lower.includes("fertiliz") || lower.includes("dosis")) {
-        botResponse = `🌾 **Recomendaciones de Fertilización:**\n\n• **Lote 1 (Maíz - 125 ha)**: Aplicar 180 lts/ha de UAN en estado V6 antes de la lluvia pronosticada.\n• **Lote 8 (Maíz - 80 ha)**: Fertilización con SolMix completada exitosamente. Respuesta esperada en 10 días.\n• **Lote 2 (Soja - 102 ha)**: Excelente nodulación, no se requiere aporte nitrogenado sintético.`;
-      } else if (lower.includes("lote 7")) {
-        botResponse = `🏆 **Estado del Lote 7 (Maíz DK 73-20 TRE - 65 ha):**\n\n• **Índice de Salud (ISL)**: **94/100 (Excelente)**\n• **Rendimiento estimado**: 112 qq/ha (El más alto del campo)\n• **Suelo**: Serie Marcos Juárez (Clase I, alta materia orgánica)\n• **Última labor**: Monitoreo foliar sin presencia de plagas ni tizón.`;
-      } else if (lower.includes("lluvia") || lower.includes("clima")) {
-        botResponse = `🌧 **Balance Hídrico Actual:**\n\n• **Última lluvia registrada**: 18 mm (hace 4 días).\n• **Acumulado mensual**: 95 mm (+12 mm por encima del promedio histórico).\n• **Humedad útil en perfil 0-100cm**: 82% de capacidad de campo.`;
+    setTimeout(async () => {
+      const lower = text.toLowerCase();
+      let botResponse = "";
+
+      const totalFields = fields.length;
+      const totalHa = fields.reduce((acc, f) => acc + f.hectareas, 0);
+      const pendingActivities = activities.filter((a) => a.estado !== "Completada");
+      const totalMm = rainfallRecords.reduce((acc, r) => acc + r.milimetros, 0);
+
+      if (totalFields === 0) {
+        botResponse = `Hola. Veo que todavía no tenés lotes cargados en **${farm.nombre}**. Podés empezar agregando tu primer lote desde la sección **Lotes** o con el botón "+ Nuevo Lote".`;
+      } else if (lower.includes("lote")) {
+        const foundField = fields.find((f) => lower.includes(f.nombre.toLowerCase()));
+        if (foundField) {
+          botResponse = `**Estado de ${foundField.nombre} (${foundField.cultivo_actual} - ${foundField.hectareas} ha):**\n\n• **Índice de Salud (ISL)**: ${foundField.isl_score}/100\n• **Rinde Estimado**: ${foundField.rendimiento_estimado || "--"} qq/ha\n• **Estado**: ${foundField.estado_fenologico || "Vegetativo"}\n• **Diagnóstico**: ${foundField.isl_resumen || "Buen estado general."}\n\n**Recomendación**: ${foundField.isl_recomendacion || "Continuar monitoreo habitual."}`;
+        } else {
+          botResponse = `Actualmente tenés **${totalFields} lotes** registrados con un total de **${totalHa} hectáreas**:\n\n${fields
+            .slice(0, 5)
+            .map(
+              (f) =>
+                `• **${f.nombre}**: ${f.cultivo_actual} (${f.hectareas} ha) - ISL: ${f.isl_score}/100`
+            )
+            .join("\n")}${
+            totalFields > 5 ? `\n• ... y ${totalFields - 5} lotes más.` : ""
+          }`;
+        }
+      } else if (lower.includes("labor") || lower.includes("tarea") || lower.includes("pendiente")) {
+        botResponse = `**Labores en el Establecimiento:**\n\n• Tenés **${pendingActivities.length} labores pendientes o en progreso**.\n• Total registradas: ${activities.length}.\n\n${
+          pendingActivities.length > 0
+            ? pendingActivities
+                .slice(0, 3)
+                .map((a) => `• [${a.estado}] ${a.tipo} en ${a.lote_nombre} (${a.fecha})`)
+                .join("\n")
+            : "No tenés labores pendientes por el momento."
+        }`;
+      } else if (lower.includes("lluvia") || lower.includes("agua") || lower.includes("clima")) {
+        botResponse = `**Registro Pluviométrico:**\n\n• **Acumulado en campaña**: ${totalMm} mm\n• **Registros cargados**: ${rainfallRecords.length} eventos pluviométricos.\n• Último registro: ${
+          rainfallRecords[0] ? `${rainfallRecords[0].milimetros} mm (${rainfallRecords[0].fecha})` : "Sin lluvias cargadas"
+        }`;
+      } else if (lower.includes("economia") || lower.includes("gasto") || lower.includes("margen") || lower.includes("rinde")) {
+        botResponse = `**Resumen Económico Campaña:**\n\n• **Ingresos Proyectados**: USD ${finances.ingresos_totales.toLocaleString()}\n• **Gastos Totales**: USD ${finances.gastos_totales.toLocaleString()}\n• **Margen Bruto**: USD ${finances.margen_bruto.toLocaleString()}\n• **Margen / ha**: USD ${finances.margen_por_ha} / ha`;
       } else {
-        botResponse = `Entendido, Gabriel. Procesé tu consulta sobre "${texto}". Actualmente el establecimiento **${establecimiento.nombre}** tiene **18 lotes activos** (11 en maíz, 7 en soja, trigo cosechado) con un Margen Bruto estimado de **USD 324.580**. ¿Te gustaría profundizar en algún lote específico o labor?`;
+        botResponse = `Procesé tu consulta para **${farm.nombre}**. Contamos con **${totalFields} lotes** (${totalHa} ha), **${pendingActivities.length} labores pendientes** y un acumulado de **${totalMm} mm** de lluvia. ¿Te gustaría profundizar en algún lote o labor en particular?`;
       }
 
-      const liaMsg: MensajeChat = {
-        id: `msg-lia-${Date.now()}`,
+      const botMsgId = `msg-lia-${Date.now()}`;
+      const botTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const suggestions = [
+        "Consultar labores pendientes",
+        "Ver balance económico",
+        "Resumen de lluvias",
+      ];
+
+      const liaMsg: ChatMessage = {
+        id: botMsgId,
         emisor: "lia",
         mensaje: botResponse,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        sugerencias: [
-          "Ver mapa de dosis Lote 4",
-          "Descargar informe ejecutivo",
-          "Consultar labores pendientes",
-        ],
+        timestamp: botTime,
+        sugerencias: suggestions,
       };
 
       setChatMessages((prev) => [...prev, liaMsg]);
-    }, 600);
-  };
 
-  const resetToDefaults = () => {
-    setEstablecimiento(ESTABLECIMIENTO_ACTUAL);
-    setCampanas(CAMPANAS_MOCK);
-    setSelectedCampanaId("camp-2025-26");
-    setLotes(LOTES_MOCK);
-    setLabores(LABORES_MOCK);
-    setTimelineEvents(TIMELINE_MOCK);
-    setLluvias(LLUVIAS_MOCK);
-    setEconomia(ECONOMIA_MOCK);
-    setMaquinarias(MAQUINARIAS_MOCK);
-    localStorage.clear();
+      if (supabase && user) {
+        await supabase.from("lia_conversaciones").insert({
+          id: botMsgId,
+          user_id: user.id,
+          emisor: "lia",
+          mensaje: botResponse,
+          timestamp: botTime,
+          sugerencias: suggestions,
+        });
+      }
+    }, 500);
   };
 
   return (
     <StoreContext.Provider
       value={{
-        establecimiento,
-        campanas,
-        selectedCampanaId,
-        setSelectedCampanaId,
-        selectedCampana,
-        lotes,
-        labores,
+        user,
+        session,
+        isAuthenticated: Boolean(user),
+        isAuthModalOpen,
+        openAuthModal: () => setIsAuthModalOpen(true),
+        closeAuthModal: () => setIsAuthModalOpen(false),
+        signOut,
+        farm,
+        seasons,
+        selectedSeasonId,
+        setSelectedSeasonId,
+        selectedSeason,
+        fields,
+        activities,
         timelineEvents,
-        lluvias,
-        economia,
-        maquinarias,
+        rainfallRecords,
+        transactions,
+        finances,
+        machinery,
         chatMessages,
         isMock: !isSupabaseConfigured,
-        addLote,
-        addLabor,
-        updateLaborStatus,
-        addLluvia,
+        isLoading,
+        addField,
+        updateField,
+        deleteField,
+        addActivity,
+        updateActivity,
+        updateActivityStatus,
+        deleteActivity,
+        addMachinery,
+        updateMachinery,
+        deleteMachinery,
+        addRainfall,
+        deleteRainfall,
+        addTransaction,
+        deleteTransaction,
+        updateFarm,
+        addSeason,
         addTimelineEvent,
         sendChatMessage,
-        resetToDefaults,
+        refetchData: async () => {
+          if (user) await loadUserData(user.id, user.user_metadata);
+        },
+
+        // Backward compatibility mappings
+        establecimiento: farm,
+        campanas: seasons,
+        selectedCampanaId: selectedSeasonId,
+        setSelectedCampanaId: setSelectedSeasonId,
+        selectedCampana: selectedSeason,
+        lotes: fields,
+        labores: activities,
+        lluvias: rainfallRecords,
+        transacciones: transactions,
+        economia: finances,
+        maquinarias: machinery,
+        addLote: addField,
+        updateLote: updateField,
+        deleteLote: deleteField,
+        addLabor: addActivity,
+        updateLabor: updateActivity,
+        updateLaborStatus: updateActivityStatus,
+        deleteLabor: deleteActivity,
+        addLluvia: addRainfall,
+        deleteLluvia: deleteRainfall,
+        addTransaccion: addTransaction,
+        deleteTransaccion: deleteTransaction,
+        updateEstablecimiento: updateFarm,
+        addCampana: addSeason,
       }}
     >
       {children}
@@ -291,6 +978,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Hook to consume the global Farm Store.
+ */
 export function useStore() {
   const context = useContext(StoreContext);
   if (!context) {
@@ -298,3 +988,5 @@ export function useStore() {
   }
   return context;
 }
+
+export const useFarmStore = useStore;
