@@ -22,8 +22,8 @@ export function LogoIcon({
   const sizeMap = {
     sm: "w-7 h-7",
     md: "w-9 h-9",
-    lg: "w-12 h-12",
-    xl: "w-20 h-20",
+    lg: "w-11 h-11",
+    xl: "w-16 h-16",
   };
 
   return (
@@ -46,7 +46,6 @@ export function LogoIcon({
       />
 
       {/* Internal partition grid lines */}
-      {/* Horizontal divider line */}
       <line
         x1="10"
         y1="48"
@@ -57,7 +56,6 @@ export function LogoIcon({
         strokeLinecap="round"
       />
 
-      {/* Top vertical divider */}
       <line
         x1="62"
         y1="10"
@@ -68,7 +66,6 @@ export function LogoIcon({
         strokeLinecap="round"
       />
 
-      {/* Bottom vertical divider */}
       <line
         x1="42"
         y1="48"
@@ -79,7 +76,7 @@ export function LogoIcon({
         strokeLinecap="round"
       />
 
-      {/* Bottom-right crop contour / furrow arcs */}
+      {/* Crop contour / furrow arcs */}
       <path
         d="M 50 90 A 40 40 0 0 1 90 50"
         stroke={color}
@@ -117,32 +114,29 @@ export function Logo({
   }
 
   const textSizeMap = {
-    sm: "text-lg tracking-[0.18em]",
-    md: "text-xl tracking-[0.22em]",
-    lg: "text-2xl tracking-[0.25em]",
-    xl: "text-4xl tracking-[0.3em]",
+    sm: "text-lg",
+    md: "text-xl",
+    lg: "text-2xl",
+    xl: "text-3xl",
   };
 
   return (
-    <div className={cn("inline-flex items-center gap-3 select-none", className)}>
+    <div className={cn("inline-flex items-center gap-2.5 select-none", className)}>
       <LogoIcon size={size} />
       {showText && (
         <div className="flex flex-col">
           <span
             className={cn(
-              "font-bold text-stone-900 font-sans leading-none",
+              "font-bold text-stone-900 font-sans tracking-wide leading-none",
               textSizeMap[size]
             )}
           >
-            L O T E
+            LOTE
           </span>
           {showSubtitle && (
-            <div className="mt-1 flex flex-col items-center">
-              <span className="w-6 h-[2px] bg-[#4F8A3F] rounded-full mb-1"></span>
-              <span className="text-[9px] uppercase tracking-wider text-stone-500 font-medium whitespace-nowrap">
-                Entender el campo nunca fue tan simple
-              </span>
-            </div>
+            <span className="text-[10px] text-stone-500 font-medium tracking-normal mt-0.5">
+              Inteligencia Agronómica
+            </span>
           )}
         </div>
       )}

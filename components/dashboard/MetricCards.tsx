@@ -12,63 +12,66 @@ import {
 import { useStore } from "@/lib/supabase/store";
 import { formatCurrency, formatHectares } from "@/lib/utils";
 
+/**
+ * KPI Metric Cards component displaying farm overview numbers.
+ */
 export function MetricCards() {
-  const { lotes, labores, economia } = useStore();
+  const { fields, activities, finances } = useStore();
 
-  const totalLotes = lotes.length;
-  const totalHectareas = lotes.reduce((acc, l) => acc + l.hectareas, 0);
+  const totalFields = fields.length;
+  const totalHectares = fields.reduce((acc, f) => acc + f.hectareas, 0);
 
-  const lotesMaiz = lotes.filter(
-    (l) => l.cultivo_actual.toLowerCase() === "maíz" || l.cultivo_actual.toLowerCase() === "maiz"
+  const cornFields = fields.filter(
+    (f) => f.cultivo_actual?.toLowerCase() === "maíz" || f.cultivo_actual?.toLowerCase() === "maiz"
   );
-  const haMaiz = lotesMaiz.reduce((acc, l) => acc + l.hectareas, 0);
+  const cornHectares = cornFields.reduce((acc, f) => acc + f.hectareas, 0);
 
-  const lotesSoja = lotes.filter((l) => l.cultivo_actual.toLowerCase() === "soja");
-  const haSoja = lotesSoja.reduce((acc, l) => acc + l.hectareas, 0);
+  const soyFields = fields.filter((f) => f.cultivo_actual?.toLowerCase() === "soja");
+  const soyHectares = soyFields.reduce((acc, f) => acc + f.hectareas, 0);
 
-  const laboresPendientes = labores.filter((l) => l.estado === "Pendiente" || l.estado === "En progreso");
-  const haLaboresPendientes = laboresPendientes.reduce((acc, l) => acc + l.superficie_ha, 0);
+  const pendingActivities = activities.filter((a) => a.estado === "Pendiente" || a.estado === "En progreso");
+  const pendingHectares = pendingActivities.reduce((acc, a) => acc + a.superficie_ha, 0);
 
   const cards = [
     {
       label: "Lotes totales",
-      value: totalLotes.toString(),
-      subtext: formatHectares(totalHectareas),
+      value: totalFields.toString(),
+      subtext: formatHectares(totalHectares),
       icon: Layers,
       color: "bg-[#4F8A3F] text-white",
-      href: "/lotes",
+      href: "/fields",
     },
     {
       label: "En maíz",
-      value: lotesMaiz.length.toString(),
-      subtext: formatHectares(haMaiz),
+      value: cornFields.length.toString(),
+      subtext: formatHectares(cornHectares),
       icon: Sprout,
       color: "bg-[#4F8A3F] text-white",
-      href: "/lotes?cultivo=Maíz",
+      href: "/fields?cultivo=Maíz",
     },
     {
       label: "En soja",
-      value: lotesSoja.length.toString(),
-      subtext: formatHectares(haSoja),
+      value: soyFields.length.toString(),
+      subtext: formatHectares(soyHectares),
       icon: Leaf,
       color: "bg-[#4F8A3F] text-white",
-      href: "/lotes?cultivo=Soja",
+      href: "/fields?cultivo=Soja",
     },
     {
       label: "Labores pendientes",
-      value: laboresPendientes.length.toString(),
-      subtext: formatHectares(haLaboresPendientes),
+      value: pendingActivities.length.toString(),
+      subtext: formatHectares(pendingHectares),
       icon: Wrench,
       color: "bg-[#4F8A3F] text-white",
-      href: "/labores",
+      href: "/activities",
     },
     {
       label: "Margen bruto",
-      value: formatCurrency(economia.margen_bruto),
+      value: formatCurrency(finances.margen_bruto),
       subtext: "Campaña actual",
       icon: DollarSign,
       color: "bg-[#4F8A3F] text-white",
-      href: "/economia",
+      href: "/finances",
     },
   ];
 
